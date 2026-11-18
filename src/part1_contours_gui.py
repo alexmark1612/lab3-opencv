@@ -171,7 +171,7 @@ def process_image(path):
         make_tile(step4, "4. Удаление шумов"),
         make_tile(step5, "5. Все контуры"),
         make_tile(step6, "6. Фильтрация"),
-        make_tile(step7, "7. Приближение"),
+        make_tile(step7, "7. Уравнение контуров"),
         make_tile(step8, "8. Рамки объектов"),
     ]
 
