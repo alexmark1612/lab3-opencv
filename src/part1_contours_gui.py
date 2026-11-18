@@ -16,6 +16,11 @@ MIN_AREA = 20
 # сжатия в плитку 400x300 остаются видимыми
 MAX_IMAGE_WIDTH = 1600
 
+# Размер экрана в пикселях, заполняется в main().
+# Нужен, чтобы окно с сеткой влезало даже на маленький экран ноутбука
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 800
+
 
 def load_image(path):
     """Читает картинку с диска. np.fromfile нужен для путей с русскими буквами."""
@@ -156,22 +161,55 @@ def choose_file():
         messagebox.showerror("Ошибка", "Не удалось открыть изображение:\n" + path)
         return
 
+    # Вписываем сетку в экран, иначе на ноутбуке окно уходит за края
+    max_width = max(400, SCREEN_WIDTH - 80)
+    max_height = max(300, SCREEN_HEIGHT - 120)
+    scale = min(1.0, max_width / grid.shape[1], max_height / grid.shape[0])
+
+    view = grid
+    if scale < 1.0:
+        view = cv2.resize(grid, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
     # На Linux с GTK-сборкой OpenCV отдельный поток окна убирает зависания
     cv2.startWindowThread()
     cv2.namedWindow("Contour analysis", cv2.WINDOW_NORMAL)
-    cv2.imshow("Contour analysis", grid)
+    cv2.imshow("Contour analysis", view)
+    cv2.resizeWindow("Contour analysis", view.shape[1], view.shape[0])
+    cv2.moveWindow("Contour analysis", 30, 30)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
 def main():
+    global SCREEN_WIDTH, SCREEN_HEIGHT
+
     root = tk.Tk()
     root.title("Laboratory 3 - Contours")
-    root.geometry("320x120")
-    root.resizable(False, False)
 
-    button = tk.Button(root, text="Загрузить изображение", font=("Arial", 12), command=choose_file)
-    button.pack(expand=True)
+    # На HiDPI-экранах Tk по умолчанию рисует всё мелким - подстраиваем масштаб
+    root.tk.call("tk", "scaling", root.winfo_fpixels("1i") / 72.0)
+
+    SCREEN_WIDTH = root.winfo_screenwidth()
+    SCREEN_HEIGHT = root.winfo_screenheight()
+
+    window_width = min(520, SCREEN_WIDTH - 80)
+    window_height = 220
+    x = (SCREEN_WIDTH - window_width) // 2
+    y = (SCREEN_HEIGHT - window_height) // 3
+    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+    root.minsize(360, 160)
+
+    button = tk.Button(root, text="Загрузить изображение", font=("Arial", 14), command=choose_file)
+    button.pack(expand=True, fill=tk.BOTH, padx=20, pady=(20, 10))
+
+    hint = tk.Label(
+        root,
+        text="Выберите картинку - откроется окно с 8 шагами обработки.\n"
+             "Любая клавиша закрывает окно с результатом.",
+        font=("Arial", 10),
+        justify=tk.CENTER,
+    )
+    hint.pack(pady=(0, 15))
 
     root.mainloop()
 

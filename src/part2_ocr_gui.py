@@ -20,9 +20,14 @@ else:
     if tesseract_in_path:
         pytesseract.pytesseract.tesseract_cmd = tesseract_in_path
 
-# Максимальный размер картинки, который показываем в окне
+# Максимальная ширина исходника при отрисовке результата OCR.
+# Сам размер превью подстраивается под окно в show_pil_image()
 PREVIEW_MAX_WIDTH = 900
 PREVIEW_MAX_HEIGHT = 720
+
+# Размер экрана в пикселях, заполняется в main()
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 800
 
 # Сколько строк распознанного текста максимум рисуем на картинке.
 # Иначе для целой страницы текста полоса становится огромной, а после
@@ -149,21 +154,42 @@ def compose_result(pil_image, recognized_text):
 
 
 def show_pil_image(label, pil_image):
-    """Показывает PIL-картинку в Label, подгоняя её под размер окна."""
+    """Показывает PIL-картинку в Label, подгоняя её под текущий размер окна."""
     global photo
 
     preview = pil_image.copy()
-    preview.thumbnail((PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS)
+
+    # Берём реальный размер левой панели, а не фиксированные 900x720,
+    # иначе на ноутбуке картинка обрезается или вылезает за окно
+    panel_width = label.winfo_width()
+    panel_height = label.winfo_height()
+    max_width = panel_width - 10 if panel_width > 50 else PREVIEW_MAX_WIDTH
+    max_height = panel_height - 10 if panel_height > 50 else PREVIEW_MAX_HEIGHT
+
+    preview.thumbnail((max(320, max_width), max(240, max_height)), Image.LANCZOS)
 
     photo = ImageTk.PhotoImage(preview)
     label.config(image=photo, text="")
 
 
 def main():
+    global SCREEN_WIDTH, SCREEN_HEIGHT
+
     root = tk.Tk()
     root.title("OCR Распознавание текста")
-    root.geometry("1150x720")
-    root.minsize(900, 600)
+
+    # На HiDPI-экранах Tk по умолчанию рисует всё мелким - подстраиваем масштаб
+    root.tk.call("tk", "scaling", root.winfo_fpixels("1i") / 72.0)
+
+    SCREEN_WIDTH = root.winfo_screenwidth()
+    SCREEN_HEIGHT = root.winfo_screenheight()
+
+    window_width = min(1150, SCREEN_WIDTH - 80)
+    window_height = min(760, SCREEN_HEIGHT - 120)
+    x = (SCREEN_WIDTH - window_width) // 2
+    y = (SCREEN_HEIGHT - window_height) // 3
+    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+    root.minsize(760, 480)
 
     lang_var = tk.StringVar(value="rus")
 
