@@ -1,12 +1,18 @@
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 # Размер одной картинки в итоговой сетке
 TILE_WIDTH = 400
 TILE_HEIGHT = 300
+
+# Высота полосы с подписью. Картинка вписывается ниже, поэтому
+# текст никогда не пересекается с изображением
+HEADER_HEIGHT = 34
 
 # Минимальная площадь контура, всё что меньше - отбрасываем
 MIN_AREA = 20
@@ -20,6 +26,16 @@ MAX_IMAGE_WIDTH = 1600
 # Нужен, чтобы окно с сеткой влезало даже на маленький экран ноутбука
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 800
+
+# Шрифты с поддержкой кириллицы (первый найденный).
+# OpenCV не умеет рисовать русский текст, поэтому подписи делаем через Pillow
+FONT_CANDIDATES = [
+    r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+]
 
 
 def load_image(path):
@@ -36,10 +52,31 @@ def load_image(path):
     return image
 
 
+def find_font_path():
+    """Ищет файл шрифта с поддержкой кириллицы. Возвращает None, если не нашёл."""
+    for font_path in FONT_CANDIDATES:
+        if os.path.exists(font_path):
+            return font_path
+    return None
+
+
+def get_font(size):
+    """Возвращает шрифт нужного размера для русских подписей."""
+    font_path = find_font_path()
+    if font_path is not None:
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
 def make_tile(image, title):
-    """Вписывает картинку в плитку 400x300 без искажения пропорций и подписывает её."""
+    """Вписывает картинку в плитку 400x300 и подписывает её русским текстом."""
+    image_height = TILE_HEIGHT - HEADER_HEIGHT
+
     height, width = image.shape[:2]
-    scale = min(TILE_WIDTH / width, TILE_HEIGHT / height)
+    scale = min(TILE_WIDTH / width, image_height / height)
 
     new_width = max(1, int(round(width * scale)))
     new_height = max(1, int(round(height * scale)))
@@ -49,13 +86,18 @@ def make_tile(image, title):
     # Тёмный фон, чтобы плитка всегда была ровно 400x300
     tile = np.full((TILE_HEIGHT, TILE_WIDTH, 3), 40, np.uint8)
     x = (TILE_WIDTH - new_width) // 2
-    y = (TILE_HEIGHT - new_height) // 2
+    y = HEADER_HEIGHT + (image_height - new_height) // 2
     tile[y:y + new_height, x:x + new_width] = resized
 
-    # Сначала чёрная обводка, потом белый текст - так читается на любом фоне
-    cv2.putText(tile, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(tile, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-    return tile
+    # Подпись рисуем в отдельной полосе сверху через Pillow (кириллица)
+    tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+    tile_pil = Image.fromarray(tile_rgb)
+    draw = ImageDraw.Draw(tile_pil)
+
+    draw.line([(0, HEADER_HEIGHT - 1), (TILE_WIDTH, HEADER_HEIGHT - 1)], fill=(90, 90, 90))
+    draw.text((8, 8), title, font=get_font(18), fill=(255, 255, 255))
+
+    return cv2.cvtColor(np.array(tile_pil), cv2.COLOR_RGB2BGR)
 
 
 def process_image(path):
@@ -123,14 +165,14 @@ def process_image(path):
 
     # Подписываем все 8 картинок
     tiles = [
-        make_tile(step1, "1. Original"),
-        make_tile(step2, "2. Gray"),
-        make_tile(step3, "3. Binary Otsu"),
-        make_tile(step4, "4. Opened"),
-        make_tile(step5, "5. All contours"),
-        make_tile(step6, "6. Filtered"),
-        make_tile(step7, "7. Approximated"),
-        make_tile(step8, "8. Bounding boxes"),
+        make_tile(step1, "1. Исходное"),
+        make_tile(step2, "2. Оттенки серого"),
+        make_tile(step3, "3. Бинаризация (Оцу)"),
+        make_tile(step4, "4. Удаление шумов"),
+        make_tile(step5, "5. Все контуры"),
+        make_tile(step6, "6. Фильтрация"),
+        make_tile(step7, "7. Приближение"),
+        make_tile(step8, "8. Рамки объектов"),
     ]
 
     # Сетка 2 ряда по 4 картинки
