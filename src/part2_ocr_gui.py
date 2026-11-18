@@ -24,6 +24,11 @@ else:
 PREVIEW_MAX_WIDTH = 900
 PREVIEW_MAX_HEIGHT = 720
 
+# Сколько строк распознанного текста максимум рисуем на картинке.
+# Иначе для целой страницы текста полоса становится огромной, а после
+# уменьшения превью текст превращается в нечитаемые точки
+MAX_TEXT_LINES = 12
+
 # Шрифты для подписи (первый найденный). Кириллицу поддерживают Arial и DejaVu Sans
 FONT_CANDIDATES = [
     r"C:\Windows\Fonts\arial.ttf",
@@ -47,14 +52,22 @@ def load_cv_image(path):
     return image
 
 
-def get_font(size):
-    """Возвращает TrueType-шрифт нужного размера, иначе стандартный шрифт Pillow."""
+def find_font_path():
+    """Ищет файл шрифта с поддержкой кириллицы. Возвращает None, если не нашёл."""
     for font_path in FONT_CANDIDATES:
         if os.path.exists(font_path):
-            try:
-                return ImageFont.truetype(font_path, size)
-            except OSError:
-                pass
+            return font_path
+    return None
+
+
+def get_font(size):
+    """Возвращает TrueType-шрифт нужного размера, иначе стандартный шрифт Pillow."""
+    font_path = find_font_path()
+    if font_path is not None:
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            pass
     return ImageFont.load_default()
 
 
@@ -105,6 +118,11 @@ def compose_result(pil_image, recognized_text):
     font = get_font(font_size)
     lines = wrap_text(text, font, working.width - 20)
 
+    # Обрезаем слишком длинный текст, чтобы подпись осталась читаемой
+    if len(lines) > MAX_TEXT_LINES:
+        lines = lines[:MAX_TEXT_LINES]
+        lines[-1] = lines[-1] + " ..."
+
     line_height = int(font_size * 1.45)
     strip_height = line_height * len(lines) + 20
 
@@ -148,7 +166,12 @@ def main():
     root.minsize(900, 600)
 
     lang_var = tk.StringVar(value="rus")
-    status_var = tk.StringVar(value="Изображение не загружено")
+
+    # Если на Linux нет шрифта с кириллицей, предупреждаем сразу при запуске
+    if find_font_path() is None:
+        status_var = tk.StringVar(value="Внимание: не найден шрифт с поддержкой кириллицы")
+    else:
+        status_var = tk.StringVar(value="Изображение не загружено")
 
     # ---------- Верхняя панель ----------
     top_panel = tk.Frame(root)
@@ -219,6 +242,8 @@ def main():
 
         lang = lang_var.get()
 
+        # Старый результат убираем сразу, чтобы при ошибке не остался текст от прошлой картинки
+        text_area.delete("1.0", tk.END)
         status_var.set("Идёт распознавание, подождите...")
         root.update_idletasks()
 
@@ -231,7 +256,6 @@ def main():
 
         # Результат в консоль и в текстовое поле
         print(text)
-        text_area.delete("1.0", tk.END)
         text_area.insert(tk.END, text)
 
         # Исходная картинка + распознанный текст под ней

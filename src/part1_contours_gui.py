@@ -11,17 +11,41 @@ TILE_HEIGHT = 300
 # Минимальная площадь контура, всё что меньше - отбрасываем
 MIN_AREA = 20
 
+# Максимальная ширина изображения для обработки.
+# Большие фото уменьшаем сразу: и память экономим, и контуры после
+# сжатия в плитку 400x300 остаются видимыми
+MAX_IMAGE_WIDTH = 1600
+
 
 def load_image(path):
     """Читает картинку с диска. np.fromfile нужен для путей с русскими буквами."""
     data = np.fromfile(path, dtype=np.uint8)
     image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+    if image is not None and image.shape[1] > MAX_IMAGE_WIDTH:
+        scale = MAX_IMAGE_WIDTH / image.shape[1]
+        new_size = (MAX_IMAGE_WIDTH, max(1, int(round(image.shape[0] * scale))))
+        image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+        print(f"Изображение уменьшено до {new_size[0]}x{new_size[1]}")
+
     return image
 
 
 def make_tile(image, title):
-    """Приводит картинку к размеру 400x300 и пишет сверху её название."""
-    tile = cv2.resize(image, (TILE_WIDTH, TILE_HEIGHT))
+    """Вписывает картинку в плитку 400x300 без искажения пропорций и подписывает её."""
+    height, width = image.shape[:2]
+    scale = min(TILE_WIDTH / width, TILE_HEIGHT / height)
+
+    new_width = max(1, int(round(width * scale)))
+    new_height = max(1, int(round(height * scale)))
+    interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+    resized = cv2.resize(image, (new_width, new_height), interpolation=interpolation)
+
+    # Тёмный фон, чтобы плитка всегда была ровно 400x300
+    tile = np.full((TILE_HEIGHT, TILE_WIDTH, 3), 40, np.uint8)
+    x = (TILE_WIDTH - new_width) // 2
+    y = (TILE_HEIGHT - new_height) // 2
+    tile[y:y + new_height, x:x + new_width] = resized
 
     # Сначала чёрная обводка, потом белый текст - так читается на любом фоне
     cv2.putText(tile, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4, cv2.LINE_AA)
@@ -34,6 +58,9 @@ def process_image(path):
     image = load_image(path)
     if image is None:
         return None
+
+    # Толщина линий с запасом, чтобы после уменьшения в плитку они не исчезали
+    line_thickness = max(1, int(round(image.shape[1] / TILE_WIDTH)))
 
     # Шаг 1. Исходное изображение
     step1 = image.copy()
@@ -54,17 +81,23 @@ def process_image(path):
     # Шаг 5. Поиск контуров и отрисовка ВСЕХ найденных контуров на чёрном фоне
     contours, hierarchy = cv2.findContours(opened, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     step5 = np.zeros_like(image)
-    cv2.drawContours(step5, contours, -1, (0, 255, 0), 1)
+    cv2.drawContours(step5, contours, -1, (0, 255, 0), line_thickness)
 
     # Шаг 6. Фильтрация: оставляем только контуры с площадью не меньше 20 пикселей
+    # Заодно запоминаем внешние контуры (у них нет родителя в hierarchy) -
+    # рамки на шаге 8 рисуем только по ним, иначе внутри букв появляются лишние рамки
     filtered = []
-    for contour in contours:
+    external = []
+    for index, contour in enumerate(contours):
         area = cv2.contourArea(contour)
-        if area >= MIN_AREA:
-            filtered.append(contour)
+        if area < MIN_AREA:
+            continue
+        filtered.append(contour)
+        if hierarchy[0][index][3] == -1:
+            external.append(contour)
 
     step6 = np.zeros_like(image)
-    cv2.drawContours(step6, filtered, -1, (0, 255, 0), 1)
+    cv2.drawContours(step6, filtered, -1, (0, 255, 0), line_thickness)
 
     # Шаг 7. Упрощение (сглаживание) контуров через approxPolyDP
     approximated = []
@@ -75,13 +108,13 @@ def process_image(path):
         approximated.append(approx)
 
     step7 = np.zeros_like(image)
-    cv2.drawContours(step7, approximated, -1, (0, 255, 255), 1)
+    cv2.drawContours(step7, approximated, -1, (0, 255, 255), line_thickness)
 
     # Шаг 8. Рамки (bounding box) на цветной копии исходного изображения
     step8 = image.copy()
-    for contour in filtered:
+    for contour in external:
         x, y, w, h = cv2.boundingRect(contour)
-        cv2.rectangle(step8, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.rectangle(step8, (x, y), (x + w, y + h), (0, 255, 0), line_thickness)
 
     # Подписываем все 8 картинок
     tiles = [
@@ -102,6 +135,7 @@ def process_image(path):
 
     print("Найдено контуров всего:", len(contours))
     print("Осталось после фильтрации (площадь >= 20):", len(filtered))
+    print("Из них внешних (для рамок):", len(external))
     return grid
 
 
@@ -122,6 +156,8 @@ def choose_file():
         messagebox.showerror("Ошибка", "Не удалось открыть изображение:\n" + path)
         return
 
+    # На Linux с GTK-сборкой OpenCV отдельный поток окна убирает зависания
+    cv2.startWindowThread()
     cv2.namedWindow("Contour analysis", cv2.WINDOW_NORMAL)
     cv2.imshow("Contour analysis", grid)
     cv2.waitKey(0)

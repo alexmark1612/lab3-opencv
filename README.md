@@ -77,7 +77,14 @@ python test_tesseract.py
 В коде путь к Tesseract задаётся только на Windows
 (`C:\Tesseract-OCR\tesseract.exe`); на Linux используется `tesseract` из `PATH`.
 
+Тестовые изображения можно складывать в `src/images/` — эта папка исключена
+из правила игнорирования `*.png` / `*.jpg`.
+
 ## Состав изображения в part1
 
 1. Original → 2. Gray → 3. Binary Otsu → 4. Opened (morphology)
 → 5. All contours → 6. Filtered (area ≥ 20) → 7. Approximated → 8. Bounding boxes
+
+Крупные изображения перед обработкой уменьшаются до ширины 1600 px.
+Плитки 400×300 вписываются без искажения пропорций (с тёмными полями),
+толщина контуров масштабируется, чтобы линии не исчезали при сжатии.
